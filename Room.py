@@ -15,7 +15,8 @@ class Room:
 	def num_of_players(self):
 		return len(self.players)
 
-	def boardcast(self, msg):
+	def boardcast(self, msg, except_player=None):
 		for p in self.players:
-			p.sock.sendall(msg.encode())
+			if except_player is None or p != except_player:
+				p.sock.sendall(msg.encode())
 

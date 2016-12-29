@@ -90,6 +90,16 @@ class GameHall:
                 self.handle_player_chat(player, msg)
             else:
                 self.send_msg_to_player(player, "Sorry, you are not logged in\n")
+        elif msg_list[0] == '$chatall':
+            if player.is_already_login():
+                self.chat_to_hall(player, msg)
+            else:
+                self.send_msg_to_player(player, "Sorry, you are not logged in\n")
+        elif msg_list[0].startswith('$chat@'):
+            if player.is_already_login():
+                self.chat_to_other_player(player, msg)
+            else:
+                self.send_msg_to_player(player, "Sorry, you are not logged in\n")
         elif msg_list[0] == '$build' and len(msg_list) == 2:
             if player.is_already_login():
                 self.build_room(player, msg_list[1])
@@ -112,7 +122,7 @@ class GameHall:
                 self.send_msg_to_player(player, "Sorry, you are not logged in\n")
         else: # command error
             self.send_msg_to_player(player, "Wrong command, type $help to get instructions\n")
-    
+
     def build_room(self, player, roomname):
         if player.get_username() in self.player_to_room:
             self.send_msg_to_player(player, "You are already in a room, please leave first\n")
@@ -145,12 +155,12 @@ class GameHall:
                     r = self.room_map[roomname]
                     r.add_player(player)
                     self.player_to_room[player_name] = roomname
-                    r.boardcast("Welcome %s\n" % player_name)
+                    r.boardcast("Welcome to room %s, %s\n" % (roomname, player_name))
             else: # player not in any room
                 r = self.room_map[roomname]
                 r.add_player(player)
                 self.player_to_room[player_name] = roomname
-                r.boardcast("Welcome %s\n" % player_name)
+                r.boardcast("Welcome to room %s, %s\n" % (roomname, player_name))
 
     def leave_room(self, player):
         """
@@ -166,13 +176,30 @@ class GameHall:
             del self.room_map[roomname]
 
     def handle_player_chat(self, player, msg):
-        import sys
         new_msg = player.get_username() + ': ' + msg[len('$chat'):].lstrip()
-        sys.stdout.write(new_msg)
+        if player.get_username() in self.player_to_room: # player in a room, just chat in this room
+            r = self.room_map[self.player_to_room[player.get_username()]]
+            r.boardcast(new_msg, except_player=player)
+        else: # player is in game hall, talk to other player who is in game hall
+            for name, other in self.player_map.iteritems():
+                if name not in self.player_to_room and other != player:
+                    self.send_msg_to_player(other, new_msg)
+        
+    def chat_to_hall(self, player, msg):
+        new_msg = player.get_username() + ': ' + msg[len('$chatall'):].lstrip()
         # send message to other players
         for other in self.all_socks:
             if other is not player and other is not self.server_sock:
                 self.send_msg_to_player(other, new_msg)
+
+    def chat_to_other_player(self, player, msg):
+        msg_list = msg.split()
+        other_name = msg_list[0][len('$chat@'):]
+        if other_name not in self.player_map:
+            self.send_msg_to_player(player, "Player %s are not yet logged in\n" % other_name)
+        else:
+            new_msg = player.get_username() + ': ' + msg[len('$chat@' + other_name):].lstrip()
+            self.send_msg_to_player(self.player_map[other_name], new_msg)
 
     def handle_new_player(self, new_sock):
         new_player = Player.Player(new_sock)
@@ -184,6 +211,8 @@ class GameHall:
                             "\t$register username password\n" +
                             "\t$login username password\n" +
                             "\t$chat message\n" +
+                            "\t$chat@username message\n" +
+                            "\t$chatall message\n" + 
                             "\t$logout\n" + 
                             "\t$quit\n" + 
                             "\t$online_time\n" + 
@@ -191,7 +220,7 @@ class GameHall:
                             "\t$build roomname\n" + 
                             "\t$join roomname\n" + 
                             "\t$leave\n" + 
-                            "\t$rooms")
+                            "\t$rooms\n")
 
     def create_server_socket(self, address):
         """
@@ -230,6 +259,7 @@ class GameHall:
                 return
         # valid player
         player.login(username)
+        self.player_map[username] = player
         if is_already_register:
             self.send_msg_to_player(player, "Register and login success, you are now in game hall\n")
         else:
@@ -243,6 +273,7 @@ class GameHall:
             time_to_add = player.get_online_time()
             self.update_history_online_time(player.get_username(), time_to_add)
             self.send_msg_to_player(player, "Logout success, online time: %d seconds\n" % time_to_add)
+            del self.player_map[player.get_username()]
             player.logout()
         else:
             self.send_msg_to_player(player, "You are not yet logged in\n")
