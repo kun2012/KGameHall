@@ -2,6 +2,7 @@ import socket
 import select
 import sqlite3
 import Player
+import Room
 
 """
 Problems:
@@ -25,6 +26,9 @@ class GameHall:
         self.host = host
         self.port = port
         self.all_socks = []
+        self.room_map = {} # mapping from room name to room object
+        self.player_map = {} # mapping from player name to player object
+        self.player_to_room = {} # mapping from player name to room name
 
     def run(self):
         """
@@ -82,14 +86,85 @@ class GameHall:
             else:
                 self.send_msg_to_player(player, "Sorry, you are not logged in\n")
         elif msg_list[0] == '$chat':
-            # check to see if player is logged in
             if player.is_already_login():
                 self.handle_player_chat(player, msg)
+            else:
+                self.send_msg_to_player(player, "Sorry, you are not logged in\n")
+        elif msg_list[0] == '$build' and len(msg_list) == 2:
+            if player.is_already_login():
+                self.build_room(player, msg_list[1])
+            else:
+                self.send_msg_to_player(player, "Sorry, you are not logged in\n")
+        elif msg_list[0] == '$join' and len(msg_list) == 2:
+            if player.is_already_login():
+                self.join_room(player, msg_list[1])
+            else:
+                self.send_msg_to_player(player, "Sorry, you are not logged in\n")
+        elif msg_list[0] == '$rooms' and len(msg_list) == 1:
+            if player.is_already_login():
+                self.show_rooms(player)
+            else:
+                self.send_msg_to_player(player, "Sorry, you are not logged in\n")
+        elif msg_list[0] == '$leave' and len(msg_list) == 1:
+            if player.is_already_login():
+                self.leave_room(player)
             else:
                 self.send_msg_to_player(player, "Sorry, you are not logged in\n")
         else: # command error
             self.send_msg_to_player(player, "Wrong command, type $help to get instructions\n")
     
+    def build_room(self, player, roomname):
+        if player.get_username() in self.player_to_room:
+            self.send_msg_to_player(player, "You are already in a room, please leave first\n")
+        elif roomname in self.room_map:
+            self.send_msg_to_player(player, "Room %s already exist, try other room name\n" % roomname)
+        else:
+            r = Room.Room(roomname)
+            r.add_player(player)
+            self.player_to_room[player.get_username()] = roomname
+            self.room_map[roomname] = r
+            self.send_msg_to_player(player, "Build room %s success\n" % roomname)
+
+    def show_rooms(self, player):
+        self.send_msg_to_player(player, "Num of rooms: %d\n" % len(self.room_map))
+        for k, v in self.room_map.iteritems():
+            self.send_msg_to_player(player, k + "(" + str(v.num_of_players()) + " players)\n")
+
+    def join_room(self, player, roomname):
+        if roomname not in self.room_map:
+            self.send_msg_to_player(player, "Room %s does not exist\n" % roomname)
+        else:
+            player_name = player.get_username()
+            if player_name in self.player_to_room:
+                # player is already in a room
+                old_roomname = self.player_to_room[player_name]
+                if old_roomname == roomname:  # in the same room
+                    self.send_msg_to_player(player, "You are already in room %s\n" % roomname)
+                else:
+                    self.leave_room(player)
+                    r = self.room_map[roomname]
+                    r.add_player(player)
+                    self.player_to_room[player_name] = roomname
+                    r.boardcast("Welcome %s\n" % player_name)
+            else: # player not in any room
+                r = self.room_map[roomname]
+                r.add_player(player)
+                self.player_to_room[player_name] = roomname
+                r.boardcast("Welcome %s\n" % player_name)
+
+    def leave_room(self, player):
+        """
+        Leave current room and back into game hall
+        """
+        player_name = player.get_username()
+        roomname = self.player_to_room[player_name]
+        del self.player_to_room[player_name]
+        r = self.room_map[roomname]
+        r.boardcast("Player %s leave room\n" % player_name)
+        r.remove_player(player)
+        if r.num_of_players() == 0:
+            del self.room_map[roomname]
+
     def handle_player_chat(self, player, msg):
         import sys
         new_msg = player.get_username() + ': ' + msg[len('$chat'):].lstrip()
@@ -112,7 +187,11 @@ class GameHall:
                             "\t$logout\n" + 
                             "\t$quit\n" + 
                             "\t$online_time\n" + 
-                            "\t$history_online_time\n")
+                            "\t$history_online_time\n" + 
+                            "\t$build roomname\n" + 
+                            "\t$join roomname\n" + 
+                            "\t$leave\n" + 
+                            "\t$rooms")
 
     def create_server_socket(self, address):
         """
