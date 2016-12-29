@@ -12,28 +12,23 @@ class PlayerClient:
         self.port = port
         self.server_sock = None
 
-    @staticmethod
-    def prompt():
-        sys.out.write('> ')
-        sys.out.flush()
-
     def run(self):
         self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server_sock.connect((self.host, self.port))
-        print 'Connect to server'
-        all_socks = [self.server_sock]
+        all_socks = [sys.stdin, self.server_sock]
         while True:
             read_socks, write_socks, error_socks = select.select(all_socks, [], [])
-            print 'ok'
             for sock in read_socks:
                 if sock is self.server_sock:  # message from server
                     msg = sock.recv(MAX_MESSAGE_LENGTH)
                     if not msg:
-                        print "Server down!"
-                        sys.exit(2)
+                        sys.exit(1)
                     else:
-                        print msg
+                        sys.stdout.write(msg)
+                        # if not msg.startswith('logout'):
+                        #    sys.stdout.write('> ')
+                        #    sys.stdout.flush()
                 else:
                     msg = sys.stdin.readline()
                     self.server_sock.sendall(msg)

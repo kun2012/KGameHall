@@ -1,3 +1,6 @@
+import datetime
+
+
 class Player:
     def __init__(self, sock):
         sock.setblocking(0)
@@ -8,11 +11,16 @@ class Player:
     def fileno(self):
         return self.sock.fileno()
 
-    def set_login_time(self, login_time):
-        self.login_time = login_time
+    def login(self, username):
+        self.username = username
+        self.login_time = datetime.datetime.now()
 
-    def get_login_time(self):
-        return self.login_time
+    def logout(self):
+        self.username = None
+        self.login_time = None
+
+    def get_online_time(self):
+        return (datetime.datetime.now() - self.login_time).seconds
 
     def set_username(self, username):
         self.username = username

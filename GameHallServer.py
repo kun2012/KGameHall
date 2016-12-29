@@ -24,7 +24,7 @@ class GameHall:
         self.server_sock = None
         self.host = host
         self.port = port
-        self.all_sock = []
+        self.all_socks = []
 
     def run(self):
         """
@@ -32,10 +32,10 @@ class GameHall:
         """
         self.check_and_create_user_login_table()
         self.create_server_socket((self.host, self.port))
-        self.all_sock.append(self.server_sock)
+        self.all_socks.append(self.server_sock)
         # start the server
         while True:
-            read_socks, write_socks, error_socks = select.select(self.all_sock, [], [])
+            read_socks, write_socks, error_socks = select.select(self.all_socks, [], [])
             for player in read_socks:
                 if player is self.server_sock:  # a new connection request received
                     new_sock, address = player.accept()
@@ -45,60 +45,74 @@ class GameHall:
                     if msg:
                         self.handle_msg(player, msg)
                     else:  # close socket
+                        if player.is_already_login():
+                            self.update_history_online_time(player.get_username(), player.get_online_time())
                         player.sock.close()
-                        self.all_sock.remove(player)
+                        self.all_socks.remove(player)
             for sock in error_socks:
                 sock.close()
-                self.all_sock.remove(sock)
+                self.all_socks.remove(sock)
 
     def send_msg_to_player(self, player, msg):
-        player.sock.sendall(msg + '\n\r')
+        player.sock.sendall(msg.encode())
 
     def handle_msg(self, player, msg):
         msg = msg.lstrip()
-        print msg
-        if msg.startswith('$register'):
-            msg_list = msg.split()
-            print msg_list
-            if len(msg_list) == 3:
-                self.register(player, msg_list[1], msg_list[2])
-                return True
-        if msg.startswith('$login'):
-            msg_list = msg.split()
-            if len(msg_list) == 3:
-                is_ok, msg = self.login(player, msg_list[1], msg_list[2])
-                self.send_msg_to_player(player, msg)
-                return True
-        # check to see if player is logged in
-        if not player.is_already_login():
-            self.send_msg_to_player(player, "sorry, you are not logged in")
-            return False
-        if msg.startswith('$logout'):
-            msg_list = msg.split()
-            if len(msg_list) == 1:
-                self.logout(player)
-                return True
-        if msg.startswith('$chat'):
-            msg_list = msg.split()
-            if len(msg_list) == 2:
-                pass
-        # command error
-        self.send_msg_to_player(player, "command error")
-        self.send_help_msg(player)
-        return False
+        msg_list = msg.split()
+        if len(msg_list) <= 0:
+            self.send_msg_to_player(player, "Empty command, type $help to get instructions\n")
+        elif msg_list[0] == '$help' and len(msg_list) == 1:
+            self.send_help_msg(player)
+        elif msg_list[0] == '$register' and len(msg_list) == 3:
+            self.register(player, msg_list[1], msg_list[2])
+        elif msg_list[0] == '$login' and len(msg_list) == 3:
+            self.login(player, msg_list[1], msg_list[2])
+        elif msg_list[0] == '$logout' and len(msg_list) == 1:
+            self.logout(player)
+        elif msg_list[0] == '$quit' and len(msg_list) == 1:
+            self.quit(player)
+        elif msg_list[0] == '$online_time' and len(msg_list) == 1:
+            if player.is_already_login():
+                self.send_msg_to_player(player, "Online time: %d seconds\n" % player.get_online_time())
+            else:
+                self.send_msg_to_player(player, "Sorry, you are not logged in\n")
+        elif msg_list[0] == '$history_online_time' and len(msg_list) == 1:
+            if player.is_already_login():
+                self.send_msg_to_player(player, "History online time: %d seconds\n" % self.get_history_online_time(player.get_username()))
+            else:
+                self.send_msg_to_player(player, "Sorry, you are not logged in\n")
+        elif msg_list[0] == '$chat':
+            # check to see if player is logged in
+            if player.is_already_login():
+                self.handle_player_chat(player, msg)
+            else:
+                self.send_msg_to_player(player, "Sorry, you are not logged in\n")
+        else: # command error
+            self.send_msg_to_player(player, "Wrong command, type $help to get instructions\n")
+    
+    def handle_player_chat(self, player, msg):
+        import sys
+        new_msg = player.get_username() + ': ' + msg[len('$chat'):].lstrip()
+        sys.stdout.write(new_msg)
+        # send message to other players
+        for other in self.all_socks:
+            if other is not player and other is not self.server_sock:
+                self.send_msg_to_player(other, new_msg)
 
     def handle_new_player(self, new_sock):
         new_player = Player.Player(new_sock)
-        self.all_sock.append(new_player)
-        self.send_msg_to_player(new_player, "Welcome to KGameHall")
-        self.send_help_msg(new_player)
+        self.all_socks.append(new_player)
+        self.send_msg_to_player(new_player, "Welcome to KGameHall\nType $help to get instructions\n")
 
     def send_help_msg(self, player):
-        player.sock.sendall("Commands:\n\r" +
-                            "$register username password\n\r" +
-                            "$login username password\n\r" +
-                            "$chat message\n\r" +
-                            "$logout\n\r")
+        self.send_msg_to_player(player, "Commands:\n" +
+                            "\t$register username password\n" +
+                            "\t$login username password\n" +
+                            "\t$chat message\n" +
+                            "\t$logout\n" + 
+                            "\t$quit\n" + 
+                            "\t$online_time\n" + 
+                            "\t$history_online_time\n")
 
     def create_server_socket(self, address):
         """
@@ -115,35 +129,51 @@ class GameHall:
         """
         Create a new account
         """
+        if player.is_already_login():
+            self.send_msg_to_player(player, "You are already logged in, logout out first\n")
+            return
         if self.add_user_to_database(username, password):
             self.login(player, username, password)
-            self.send_msg_to_player(player, "register and login success, you are now in game hall")
         else:
-            self.send_msg_to_player(player, "username already exist")
+            self.send_msg_to_player(player, "Player %s already exist\n" % username)
 
     def login(self, player, username, password, is_already_register=False):
         """
         Handle user login
         """
-        import datetime
+        if player.is_already_login():
+            self.send_msg_to_player(player, "You are already logged in, logout out first\n")
+            return
         if not is_already_register:
-            is_ok, msg = self.user_authentication(username, password)
-            if not is_ok:  # login fail
-                return False, msg
-        player.set_username(username)
-        player.set_login_time(datetime.datetime.now())
-        return True, "login success"
+            msg = self.user_authentication(username, password)
+            if msg:  # login fail
+                self.send_msg_to_player(player, msg)
+                return
+        # valid player
+        player.login(username)
+        if is_already_register:
+            self.send_msg_to_player(player, "Register and login success, you are now in game hall\n")
+        else:
+            self.send_msg_to_player(player, "Login success\n")
 
     def logout(self, player):
         """
         Handle user logout
         """
-        import datetime
-        time_to_add = (datetime.datetime.now() - player.get_login_time()).seconds
-        self.update_user_online_time(player.get_username(), time_to_add)
-        self.send_msg_to_player(player, "logout success, online time: %d seconds" % time_to_add)
+        if player.is_already_login():
+            time_to_add = player.get_online_time()
+            self.update_history_online_time(player.get_username(), time_to_add)
+            self.send_msg_to_player(player, "Logout success, online time: %d seconds\n" % time_to_add)
+            player.logout()
+        else:
+            self.send_msg_to_player(player, "You are not yet logged in\n")
+
+
+    def quit(self, player):
+        if player.is_already_login():
+            self.logout()
         player.sock.close()
-        self.all_sock.remove(player)
+        self.all_socks.remove(player)
 
     def check_and_create_user_login_table(self):
         """
@@ -182,12 +212,12 @@ class GameHall:
         c.execute("SELECT * FROM user_login WHERE username=?", (username, ))
         res = c.fetchone()
         if res is None:
-            return False, "%s not exist" % username
+            return "Player %s doesn't exist\n" % username
         if str(res[1]) != encrypt_password:
-            return False, "invalid password"
-        return True, ""
+            return "Invalid password\n"
+        return None
 
-    def update_user_online_time(self, username, time_to_add):
+    def update_history_online_time(self, username, time_to_add):
         """
         Update user online time
         """
@@ -198,7 +228,7 @@ class GameHall:
         c.execute("UPDATE user_login SET online_time=? WHERE username=?", (new_online_time, username))
         self.conn.commit()
 
-    def get_user_online_time(self, username):
+    def get_history_online_time(self, username):
         """
         Get user online time
         """
