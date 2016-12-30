@@ -8,12 +8,16 @@ import Room
 Problems:
 1. Online time in seconds exceeds Long
 2. encoding problem: chinese
+***3. game should be in a every room
 """
 
 SERVER_PORT = 34567
 MAX_USER_NUM = 100
 MAX_MESSAGE_LENGTH = 2048
 USER_DB_NAME = 'user_information.db'
+GAME_TIME_DELTA = 30  # means game start at every GAME_TIME_DELTA minutes, GAME_TIME_DELTA=30 means game start at \
+                      # 00:00, 00:30, 01:00, ... , 23:30
+GAME_DURATION = 15 # in seconds
 
 
 class GameHall:
@@ -29,17 +33,36 @@ class GameHall:
         self.room_map = {} # mapping from room name to room object
         self.player_map = {} # mapping from player name to player object
         self.player_to_room = {} # mapping from player name to room name
+        self.game_number = []
+        self.game_start = False
 
     def run(self):
         """
         Start the game hall server
         """
+        import datetime
         self.check_and_create_user_login_table()
         self.create_server_socket((self.host, self.port))
         self.all_socks.append(self.server_sock)
+        game_msg_send = set()  # record whether the game message have been sent to de player
+        last_game_time = None
         # start the server
         while True:
-            read_socks, write_socks, error_socks = select.select(self.all_socks, [], [])
+            tim = datetime.datetime.now()
+            if not self.game_start and tim.minute % GAME_TIME_DELTA == 0 and tim.second == 0 
+                and (last_game_time is None or tim.seconds - last_game_time >= GAME_TIME_DELTA * 60):  # game may be finished in less than 1 seconds
+                self.game_start = True
+                game_msg = self.generate_game_number_msg()
+                game_msg_send = set()
+                last_game_time = tim.seconds
+
+            if self.game_start and tim.second == GAME_DURATION:
+                self.game_start = False
+
+            if self.game_start:
+                read_socks, write_socks, error_socks = select.select(self.all_socks, self.all_socks, [])
+            else:
+                read_socks, write_socks, error_socks = select.select(self.all_socks, [], [])
             for player in read_socks:
                 if player is self.server_sock:  # a new connection request received
                     new_sock, address = player.accept()
@@ -53,9 +76,11 @@ class GameHall:
                             self.update_history_online_time(player.get_username(), player.get_online_time())
                         player.sock.close()
                         self.all_socks.remove(player)
-            for sock in error_socks:
-                sock.close()
-                self.all_socks.remove(sock)
+            for player in write_socks:
+                if player not in game_msg_send:
+                    self.send_msg_to_player(player, game_msg)
+                    game_msg_send.add(player)
+
 
     def send_msg_to_player(self, player, msg):
         player.sock.sendall(msg.encode())
@@ -122,6 +147,16 @@ class GameHall:
                 self.send_msg_to_player(player, "Sorry, you are not logged in\n")
         else: # command error
             self.send_msg_to_player(player, "Wrong command, type $help to get instructions\n")
+
+    def generate_game_number_msg(self):
+        """
+        Generate 4 number for the 21 point game
+        """
+        import random
+        self.game_number = []
+        for i in range(4):
+            self.game_number.append(random.randint(1, 10))
+        return "21 point game: " + " ".join(self.game_number) + "\n"
 
     def build_room(self, player, roomname):
         if player.get_username() in self.player_to_room:
@@ -220,7 +255,8 @@ class GameHall:
                             "\t$build roomname\n" + 
                             "\t$join roomname\n" + 
                             "\t$leave\n" + 
-                            "\t$rooms\n")
+                            "\t$rooms\n" + 
+                            "\t$21game math_expression\n")
 
     def create_server_socket(self, address):
         """
