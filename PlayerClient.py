@@ -1,7 +1,6 @@
 import socket
 import select
 import sys
-import GameHallServer
 
 MAX_MESSAGE_LENGTH = 2048
 
@@ -26,19 +25,17 @@ class PlayerClient:
                         sys.exit(1)
                     else:
                         sys.stdout.write(msg)
-                        # if not msg.startswith('logout'):
-                        #    sys.stdout.write('> ')
-                        #    sys.stdout.flush()
                 else:
                     msg = sys.stdin.readline()
                     self.server_sock.sendall(msg)
 
 
 def main():
+    port = 34567
     if len(sys.argv) < 2:
         print "Usage: python PlayerClient.py [hostname]"
         sys.exit(1)
-    pc = PlayerClient(sys.argv[1], GameHallServer.SERVER_PORT)
+    pc = PlayerClient(sys.argv[1], port)
     pc.run()
 
 if __name__ == '__main__':
