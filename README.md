@@ -6,6 +6,7 @@ A game hall server support talking and playing games
 
 ### Server
 
+```
 python GameHallServer.py [-h] [-o HOST] [-p PORT] [-n DBNAME] [-u CONNECTNUM]
                          [-d TIME_DELTA] [-l TIME_DURATION]
 
@@ -17,6 +18,7 @@ optional arguments:
   -u, --connectnum	Number of client connection
   -d, --time_delta	21 point game time delta(in minutes)
   -l, --time_duration	21 point game time duration(in seconds)
+```
 
 ### Client
 
