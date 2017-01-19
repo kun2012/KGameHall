@@ -55,11 +55,14 @@ class GameHall:
                     new_sock, address = player.accept()
                     self.handle_new_player(new_sock)
                 else:  # receive message from a player
-                    msg = player.sock.recv(self.buffer_len)
-                    if msg:
-                        self.handle_msg(player, msg)
-                    else:  # close socket
-                        self.handle_player_disconnect(player)
+                    try:
+                        msg = player.sock.recv(self.buffer_len)
+                        if msg:
+                            self.handle_msg(player, msg)
+                        else:  # close socket
+                            self.handle_player_disconnect(player)
+                    except socket.error:
+                        pass
             for player in error_socks:
                 self.handle_player_disconnect(player)
 
